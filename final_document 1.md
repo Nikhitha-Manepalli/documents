@@ -1,22 +1,70 @@
 # P6P9 LLD
 
+<style>
+/* Table width and layout (supported by VS Code/Cursor Markdown preview and HTML-based exports) */
+table {
+  width: 100%;
+  max-width: 100%;
+  table-layout: auto;
+  border-collapse: collapse;
+  box-sizing: border-box;
+}
+table th,
+table td {
+  vertical-align: top;
+  padding: 0.4em 0.55em;
+  word-break: break-word;
+  hyphens: auto;
+}
+</style>
+
 # Table of Contents
 
-Summary Business purpose
-
-# Core Business Functions Service Catalog
-
-Batch Specific Information and Business Logic Storage Architecture
-
-# Sequence Diagrams TechnologiesAPI UINon-ProdPrivate End PointTagsUser AccessService PrincipalProdPrivate End PointTagsService Principal
-
-- 1.  User Access Github & Pipeline PV Groups
-
-Entra AD Registration
-
-Data Mapping and Schema Design Rollback Plan
-
-Monitoring and Logging Validation Checkpoints Final Design Position
+- [Summary](#summary)
+- [Business purpose](#business-purpose)
+- [Core Business Functions](#core-business-functions)
+- [Service Catalog](#service-catalog)
+- [Batch Specific Information and Business Logic](#batch-specific-information-and-business-logic)
+- [Batch Input and Execution Model](#batch-input-and-execution-model)
+- [Batch Business Rules](#batch-business-rules)
+- [Modern Batch Output Design](#modern-batch-output-design)
+- [Processing Logic](#processing-logic)
+- [Retry Strategy](#retry-strategy)
+- [Idempotency](#idempotency)
+- [Storage Architecture](#storage-architecture)
+- [Folder Structure](#folder-structure)
+- [Architecture Diagram](#architecture-diagram)
+- [Business process flow Diagram](#business-process-flow-diagram)
+- [Sequence Diagrams](#sequence-diagrams)
+- [Technologies](#technologies)
+- [API](#api)
+- [Required service interfaces](#required-service-interfaces)
+- [Policy eligibility: Endpoint](#endpoint)
+- [Policy eligibility: Purpose](#purpose)
+- [Tax-code update: Endpoint](#endpoint-1)
+- [Tax-code update: Purpose](#purpose-1)
+- [UI](#ui)
+- [Non-Prod](#non-prod)
+- [Non-Prod: Private End Point](#private-end-point)
+- [Non-Prod: Tags](#tags)
+- [Non-Prod: User Access](#user-access)
+- [Non-Prod: Service Principal](#service-principal)
+- [Prod](#prod)
+- [Prod: Private End Point](#prod-private-end-point)
+- [Prod: Tags](#prod-tags)
+- [Prod: Service Principal](#prod-service-principal)
+- [Prod: User Access](#prod-user-access)
+- [Github & Pipeline](#github-pipeline)
+- [PV Groups](#pv-groups)
+- [Entra AD Registration](#entra-ad-registration)
+- [Data Mapping and Schema Design](#data-mapping-and-schema-design)
+- [Rollback Plan](#rollback-plan)
+- [Logging](#logging)
+- [Metrics](#metrics)
+- [Alerts](#alerts)
+- [Monitoring and Logging](#monitoring-and-logging)
+- [Validation Checkpoints](#validation-checkpoints)
+- [Final Design Position](#final-design-position)
 
 # Summary
 
@@ -38,9 +86,8 @@ Its purpose is to:
 
 # Core Business Functions
 
-|     |     |     |
-| --- | --- | --- |
 | **Functions** | **Sub-function** | **Functionalities** |
+| --- | --- | --- |
 | File Intake | Watched Folder | Scans app.input-dir on startup for \*.csv files (sorted) and processes them sequentially using BatchOrchestrator. |
 |     | Header Handling | Treats the first row as header and propagates it to success archive outputs via RowSplitArchiveListener. |
 | Record Model | P45 CSV Mapping | Maps fixed CSV columns to P45CsvRecord including tax year, NI, employer, PAYE form type, tax code, indicators, previous pay/tax, and effective date. |
@@ -64,23 +111,23 @@ Its purpose is to:
 
 # **Service Catalog**
 
-|     |     |     |     |     |     |     |     |     |     |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | **Service** | **Category** | **Endpoint Path** | **HTTP Method** | **Operation Type** | **Primary Database Operation** | **Schema** | **Primary Table** | **Secondary Tables** | **Description** |
-| Policy Eligibility API | Policy Validation | /api/policy/tax-code-eligibility | GET | SELECT | Read policy eligibility data | policy_service | MASTER_ARCHIVE | —   | Validates whether a policy is eligible for tax-code update based on NI, works number, tax year, PAYE form type, and employer reference. |
-| Tax Code Update API | Tax Processing | /api/policy/tax-code-updates | POST | INSERT / UPDATE | Update tax code records | policy_service | PAY_HEADER | PAYEHIST, PAPAYHIS | Applies tax-code updates for eligible policies and persists updates in downstream systems. |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Policy Eligibility API | Policy Validation | `/api/policy/tax-code-eligibility` | GET | SELECT | Read policy eligibility data | policy_service | MASTER_ARCHIVE | — | Validates whether a policy is eligible for tax-code update based on NI, works number, tax year, PAYE form type, and employer reference. |
+| Tax Code Update API | Tax Processing | `/api/policy/tax-code-updates` | POST | INSERT / UPDATE | Update tax code records | policy_service | PAY_HEADER | PAYEHIST, PAPAYHIS | Applies tax-code updates for eligible policies and persists updates in downstream systems. |
 
 Target service interaction:
 
-# P6p9-batch reads the fileP6p9-batch calls clanad-policy-api for policy eligibility and tax-code updateP6p9-batch writes success and failure files.
+P6p9-batch reads the file. P6p9-batch calls clanad-policy-api for policy eligibility and tax-code update. P6p9-batch writes success and failure files.
+
+<a id="batch-specific-information-and-business-logic"></a>
 
 **Batch Specific Information and Business Logic**
 
 ## **Batch Input and Execution Model**
 
-|     |     |
-| --- | --- |
 | **Item** | **Design** |
+| --- | --- |
 | Input Type | CSV files (P6/P9/P45) from Azure File Share |
 | Execution Style | Scheduled (AKS CronJob) with optional on-demand run |
 | Processing Unit | Chunk-based processing (Spring Batch, default ~100 records per transaction) |
@@ -93,9 +140,8 @@ Target service interaction:
 
 The legacy implementation requires at least 15 columns and uses the following positions:
 
-|     |     |
-| --- | --- |
 | **Column Index** | **Meaning** |
+| --- | --- |
 | **6** | NI number |
 | **7** | Works or payroll number |
 | **10** | Tax code |
@@ -107,9 +153,8 @@ The legacy implementation requires at least 15 columns and uses the following po
 
 # **Batch Business Rules**
 
-|     |     |
-| --- | --- |
 | **Rule** | **Description** |
+| --- | --- |
 | Minimum column count | Reject row if fewer than 15 columns are present |
 | Policy number parsing | Support normal policy number, .1 , and /1 point-one forms |
 | NI validation | Reject row if NI number is blank |
@@ -123,9 +168,8 @@ The legacy implementation requires at least 15 columns and uses the following po
 
 # **Modern Batch Output Design**
 
-|     |     |
-| --- | --- |
 | **Output** | **Purpose** |
+| --- | --- |
 | Success File | Contains records successfully processed and updated via Policy API; generated at step completion and written to archive/success/&lt;filename&gt;-timestamp.csv. |
 | Failure File | Contains records rejected due to validation errors, policy ineligibility, or API failures; includes rejection reason and written to archive/failure/&lt;filename&gt;-unmatched.csv. |
 | Archived Input File | Original input file preserved after processing; deleted on success or moved to failure archive on failure (FileArchiveService). |
@@ -142,9 +186,8 @@ The legacy implementation requires at least 15 columns and uses the following po
 
 # **Retry Strategy**
 
-|     |     |
-| --- | --- |
 | **Parameter** | **Value** |
+| --- | --- |
 | Max Retries | 3   |
 | Retry Backoff | Exponential |
 | Retryable Errors | Network Failure, HTTP 500 |
@@ -163,11 +206,12 @@ file_name + row_number
 
 This key prevents duplicate tax updates when retries or batch restarts occur.
 
-# Storage Architecture**Storage Account Proposal**
+# Storage Architecture
 
-|     |     |
-| --- | --- |
+**Storage Account Proposal**
+
 | **Property** | **Value** |
+| --- | --- |
 | Storage Account | st-clanad-p6p9-batch |
 | Region | UK South |
 | Performance | Standard |
@@ -188,9 +232,8 @@ This key prevents duplicate tax updates when retries or batch restarts occur.
 
 **/failure**
 
-|     |     |
-| --- | --- |
 | **Folder** | **Purpose** |
+| --- | --- |
 | /input | Stores incoming CSV files (P6/P9/P45) to be processed by the batch job. |
 | /archive/success | Contains successfully processed output files (success records) and completed input files (if retained). |
 | /archive/failure | Contains failed or rejected records and input files when processing fails. |
@@ -216,9 +259,8 @@ Sequence meaning:
 
 # Technologies
 
-|     |     |
-| --- | --- |
 | **Category** | **Technology** |
+| --- | --- |
 | Language | Java 25 |
 | Framework | Spring Boot 4.x |
 | Web | Spring Web |
@@ -256,9 +298,8 @@ Validates the inbound record against policy data, determines eligibility for tax
 
 **Request definition**
 
-|     |     |     |     |
-| --- | --- | --- | --- |
 | **Field** | **Type** | **Required** | **Description** |
+| --- | --- | --- | --- |
 | niNumber | string | Yes | NI number from the inbound file |
 | payrollNumber | string | Yes | Works or payroll number from the inbound file |
 | taxYear | string | Yes | Tax year from inbound record |
@@ -267,9 +308,8 @@ Validates the inbound record against policy data, determines eligibility for tax
 
 **Response definition**
 
-|     |     |     |
-| --- | --- | --- |
 | **Field** | **Type** | **Description** |
+| --- | --- | --- |
 | eligible | boolean | Indicates if the record can proceed to tax update |
 | policyStatus | string | Current policy status used for validation |
 | p45Received | date | P45 received date used for tax-year rule |
@@ -287,9 +327,8 @@ Apply the validated tax-code update command that replaces the legacy **UPDATE_TA
 
 **Request definition**
 
-|     |     |     |     |
-| --- | --- | --- | --- |
 | **Field** | **Type** | **Required** | **Description** |
+| --- | --- | --- | --- |
 | policyNumber | number | Yes | Normalized policy number returned from eligibility validation |
 | taxCode | string | Yes | Final tax code derived from the inbound file |
 | previousPay | number | Yes | Previous pay amount after any P45 same-tax-year adjustment |
@@ -299,9 +338,8 @@ Apply the validated tax-code update command that replaces the legacy **UPDATE_TA
 
 **Response definition**
 
-|     |     |     |
-| --- | --- | --- |
 | **Field** | **Type** | **Description** |
+| --- | --- | --- |
 | updated | boolean | True when the tax-code update is committed successfully |
 | resultCode | string | Outcome code for support and monitoring |
 | resultMessage | string | Human-readable outcome or failure message |
@@ -344,9 +382,8 @@ The API design follows the LV standard:
 
 Required media types:
 
-|     |     |
-| --- | --- |
 | **Service** | **Media Type** |
+| --- | --- |
 | clanad-policy-api | application/vnd.lv.clanad-policy.v1+json |
 
 Example headers:
@@ -370,9 +407,8 @@ If an operational support page is added later, it should be treated as an enhanc
 
 This section proposes a P6P9-specific non-prod file-share implementation for inbound payroll files and outbound success, failure, and archive files.
 
-|     |     |
-| --- | --- |
 | **Item** | **Value** |
+| --- | --- |
 | Environment | non-prod |
 | Resource Group | rg-p6p9-nonprod-001 |
 | Subscription | shared-aks-non-prod-001 |
@@ -403,9 +439,8 @@ Non-prod connectivity rules:
 
 Proposed non-prod mandatory tags:
 
-|     |     |
-| --- | --- |
 | **Tag Name** | **Value** |
+| --- | --- |
 | application_name | p6p9 |
 | cost_center | TBD |
 | owner | TBD |
@@ -418,9 +453,8 @@ Proposed non-prod mandatory tags:
 
 Proposed non-prod file-share access:
 
-|     |     |
-| --- | --- |
 | **PV Group** | **Access Level** |
+| --- | --- |
 | PV-RS-P6P9-NonProd-Upload | Storage File Data SMB Share Contributor |
 | PV-RS-P6P9-NonProd-Operations | Storage File Data SMB Share Contributor |
 | PV-RS-P6P9-NonProd-Developers | Storage File Data SMB Share Contributor |
@@ -431,9 +465,8 @@ Proposed non-prod file-share access:
 
 Proposed non-prod batch identity:
 
-|     |     |
-| --- | --- |
 | **Item** | **Value** |
+| --- | --- |
 | Display Name | sp-azad-p6p9-nprod |
 | Client ID | To be generated |
 | Tenant ID | To be assigned |
@@ -443,13 +476,14 @@ Proposed non-prod batch identity:
 
 # **Prod**
 
+<a id="prod-private-end-point"></a>
+
 # **2.1****Private End Point**
 
 This section proposes a P6P9-specific prod file-share implementation for inbound payroll files and outbound success, failure, and archive files.
 
-|     |     |
-| --- | --- |
 | **Item** | **Value** |
+| --- | --- |
 | Environment | prod |
 | Resource Group | rg-p6p9-prod-001 |
 | Subscription | shared-aks-prod-001 |
@@ -476,13 +510,14 @@ Prod connectivity rules:
 - batch and service traffic stays inside approved private network boundaries
 - file share contains input, archive success and failure folders
 
+<a id="prod-tags"></a>
+
 # **2.2** **Tags**
 
 Proposed prod mandatory tags:
 
-|     |     |
-| --- | --- |
 | **Tag Name** | **Value** |
+| --- | --- |
 | application_name | p6p9 |
 | cost_center | TBD |
 | owner | TBD |
@@ -491,30 +526,34 @@ Proposed prod mandatory tags:
 | business_unit | TBD |
 | cohesitybackup | yes |
 
+<a id="prod-service-principal"></a>
+
 # **2.3** **Service Principal**
 
 ## Proposed prod batch identity:
 
-|     |     |
-| --- | --- |
 | **Item** | **Value** |
+| --- | --- |
 | Display Name | sp-azad-p6p9-prod |
 | Client ID | To be generated |
 | Tenant ID | To be assigned |
 | Secret Value | Stored in Azure Key Vault |
 | Access | Storage File Data SMB Share Contributor |
 
+<a id="prod-user-access"></a>
+
 # **2.4** **User Access**
 
 Proposed prod file-share access:
 
-|     |     |
-| --- | --- |
 | **PV Group** | **Access Level** |
+| --- | --- |
 | PV-RS-P6P9-Prod-Upload | Storage File Data SMB Share Contributor |
 | PV-RS-P6P9-Prod-Operations | Storage File Data SMB Share Contributor |
 | PV-RS-Environment Management | Storage File Data SMB Share Contributor |
 | PV-RS-Solution Management | Storage File Data SMB Share Contributor |
+
+<a id="github-pipeline"></a>
 
 # **Github & Pipeline**
 
@@ -528,6 +567,8 @@ Ground-truth design expectation:
 
 Pipeline names remain TBD until confirmed.
 
+<a id="pv-groups"></a>
+
 **PV Groups**
 
 Recommended design position:
@@ -537,6 +578,8 @@ Recommended design position:
 - least-privilege membership
 
 Final PV group names remain TBD.
+
+<a id="entra-ad-registration"></a>
 
 **Entra AD Registration**
 
@@ -549,11 +592,12 @@ Required design intent:
 
 Final registration names and identifiers remain TBD.
 
+<a id="data-mapping-and-schema-design"></a>
+
 **Data Mapping and Schema Design**
 
-|     |     |     |     |
-| --- | --- | --- | --- |
 | **Legacy Asset** | **Legacy Purpose** | **Target Schema** | **Target Design** |
+| --- | --- | --- | --- |
 | MASTER_ARCHIVE | Policy lookup and eligibility | policy_service | Accessed via **clanad-policy-api** (no direct DB access) |
 | UPDATE_TAXCODE | Tax update execution | policy_service | Replaced by **clanad- policy -api** |
 | P45_RECEIVED | Same tax-year adjustment | policy_service | Returned in Policy API response for processing logic |
@@ -566,17 +610,15 @@ Final registration names and identifiers remain TBD.
 
 **Proposed database objects**
 
-|     |     |     |
-| --- | --- | --- |
 | **Schema** | **Object** | **Purpose** |
+| --- | --- | --- |
 | Policy_service | policy_tax_code_eligibility | Policy lookup source for NI, payroll number, point- one handling, status, and P45_RECEIVED logic |
 | Policy_service | tax_code_update_audit | Audit record for every accepted update |
 
 **Spring Batch Tables (runtime schema)**
 
-|     |     |
-| --- | --- |
 | **Table** | **Role** |
+| --- | --- |
 | BATCH_JOB_INSTANCE | One row per logical job run identity: JOB_NAME, JOB_KEY (parameters fingerprint), VERSION. Unique on (JOB_NAME, JOB_KEY). Primary key JOB_INSTANCE_ID. |
 | BATCH_JOB_EXECUTION | One row per **attempt** to run that job instance: CREATE_TIME, START_TIME, END_TIME, STATUS, EXIT_CODE, EXIT_MESSAGE, LAST_UPDATED, VERSION. FK to BATCH_JOB_INSTANCE. |
 | BATCH_JOB_EXECUTION_PARAMS | Job parameters for each execution: PARAMETER_NAME, PARAMETER_TYPE, PARAMETER_VALUE, IDENTIFYING (whether the param participates in job identity). FK to BATCH_JOB_EXECUTION. |
@@ -595,9 +637,8 @@ The application uses **Spring Batch chunk-based transactions** with chunk-size =
 
 **Rollback scenarios**
 
-|     |     |
-| --- | --- |
 | **Scenario** | **Rollback Strategy** |
+| --- | --- |
 | Row-level business validation failure | Record is skipped and written to failure file; no rollback required for other records. |
 | API failure (transient – retryable) | Retry using configured retry policy (exponential backoff); if retries fail, record is marked as failed and written to error output. |
 | API failure (non-retryable – 4xx) | Record is rejected and written to failure file; processing continues for remaining records. |
@@ -608,9 +649,8 @@ The application uses **Spring Batch chunk-based transactions** with chunk-size =
 
 **Recovery handling**
 
-|     |     |
-| --- | --- |
 | **Scenario** | **Recovery Approach** |
+| --- | --- |
 | Row-level validation failure | Record is skipped and written to failure file; no recovery required as processing continues. |
 | Transient API failure (5xx / network) | Automatically retried using retry policy; if still failing, record is written to failure output. |
 | Non-retryable API failure (4xx) | Record is rejected and captured in failure file; no retry attempted. |
@@ -619,6 +659,8 @@ The application uses **Spring Batch chunk-based transactions** with chunk-size =
 | Job restart | Restart supported using same job parameters (filePath); resumes from last successful chunk using Spring Batch metadata. |
 | File reprocessing | Failed or corrected files can be reintroduced into input folder for re-execution. |
 | Downstream update issues | Recovery handled via Tax API or operational support; P6P9 does not perform compensating updates. |
+
+<a id="monitoring-and-logging"></a>
 
 **Monitoring and Logging**
 
@@ -634,9 +676,8 @@ Captured events:
 
 # **Metrics**
 
-|     |     |
-| --- | --- |
 | **Metric** | **Description** |
+| --- | --- |
 | batch_runs_total | Total batch executions |
 | rows_processed_total | Rows processed |
 | rows_failed_total | Failed rows |
@@ -644,9 +685,8 @@ Captured events:
 
 # **Alerts**
 
-|     |     |
-| --- | --- |
 | **Condition** | **Action** |
+| --- | --- |
 | Batch job failure | Alert operations/support team |
 | High failure rate (e.g. > 5%) | Alert support team for investigation |
 | Repeated API failures / service unavailable | Alert platform/support team |
@@ -671,11 +711,5 @@ The correct modernization position for p6p9, based on the current evidence, is:
 - policy validation and tax update through clanad-policy-api
 - content-negotiated API versioning
 - no mandatory frontend for parity
-
-|     |     |
-| --- | --- |
-|     |     |
-|     |     |
-|     |     |
 
 P6P9
